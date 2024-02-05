@@ -1,0 +1,126 @@
+from huaweicloudsdkcore.auth.credentials import BasicCredentials
+from huaweicloudsdkcore.exceptions import exceptions
+
+# 导入v2版本sdk
+from huaweicloudsdkfrs.v2.region.frs_region import FrsRegion
+from huaweicloudsdkfrs.v2 import *
+import socket
+import cv2
+import numpy as np
+import base64
+import json
+
+# 配置ak,sk
+if __name__ == "__main__":
+    ak = "0QOEBQ4Y9GQ4YRFKH8QF"
+    sk = "FUgLdQyiLwmtQgDYjjeecfuu2HUHEx4DB2tto5h1"
+
+    credentials = BasicCredentials(ak, sk) \
+
+    client = FrsClient.new_builder() \
+        .with_credentials(credentials) \
+        .with_region(FrsRegion.value_of("cn-north-4")) \
+        .build()
+# 创建一个socket对象
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    # 监听的IP地址和端口号
+    host = '127.0.0.1'
+    port = 12345
+
+    # 监听连接
+    s.bind((host, port))
+    s.listen(1)
+    conn, addr = s.accept()
+
+    with conn:
+        # 接收图像数据
+        data = b''
+        while True:
+            packet = conn.recv(4096)
+            if not packet:
+                break
+            data += packet
+
+        # 将接收的数据转换为图像
+        img = np.frombuffer(data, dtype=np.uint8)
+        img = cv2.imdecode(img, cv2.IMREAD_COLOR)
+
+        # 保存图像到上层路径中
+        image_path = "E:\\emojy\\ImgSource\\received_image.jpg"  # 保存图像的文件路径
+        cv2.imwrite(image_path, img)
+        print("图像已保存到:", image_path)
+
+        # # 接收完图像后发送一条信息给客户端
+        # conn.sendall(b'Image received!')
+        # # 关闭连接
+        # conn.close()
+        # s.close()
+
+# 人脸搜索
+def searchFaceByBase64():
+    try:
+        request = SearchFaceByBase64Request()
+        request.face_set_name = "CarFaceSet"
+        listFaceSearchBase64ReqReturnFieldsbody = [
+        ]
+        # 读取图像文件并转换为Base64编码的字符串
+        with open(image_path, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+
+        request.body = FaceSearchBase64Req(
+            return_fields=listFaceSearchBase64ReqReturnFieldsbody,
+            image_base64=encoded_string
+        )
+        response = client.search_face_by_base64(request)
+        # print(response)
+        response_dict = response.to_str()
+
+        # 解析JSON数据
+        data = json.loads(response_dict)
+
+        # 提取每个人脸的相似度
+        similarities = [face["similarity"] for face in data["faces"]]
+
+        # 打印相似度值
+        print(similarities)
+        for face in data["faces"]:
+            if face["similarity"] > 0.5:
+                print("相似度大于0.5的值为:", face["similarity"])
+        max_similarity = 0
+        for face in data["faces"]:
+            if face["similarity"] > max_similarity:
+                max_similarity = face["similarity"]
+        print("相似度最大的值为:", max_similarity)
+        if max_similarity > 0.95:
+            print("通过")
+        else:
+            print("失败")
+    except exceptions.ClientRequestException as e:
+        print(e.status_code)
+        print(e.request_id)
+        print(e.error_code)
+        print(e.error_msg)
+# 添加人脸
+def addFacesByBase64():
+    try:
+        request = AddFacesByBase64Request()
+        request.face_set_name = "CarFaceSet"
+        # 读取图像文件并转换为Base64编码的字符串
+        with open(image_path, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+        request.body = AddFacesBase64Req(
+            # external_fields="{\"timestamp\":12}",
+            image_base64=encoded_string
+        )
+        response = client.add_faces_by_base64(request)
+        print(response)
+        print("成功")
+    except exceptions.ClientRequestException as e:
+        print(e.status_code)
+        print(e.request_id)
+        print(e.error_code)
+        print(e.error_msg)
+searchFaceByBase64()
+
+# addFacesByBase64()

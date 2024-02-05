@@ -1,0 +1,193 @@
+/*
+ * Copyright (c) 2016 Intel Corporation.  All rights reserved.
+ * See the bottom of this file for the license terms.
+ */
+
+/*
+   This sketch example demonstrates how the BMI160 on the
+   Intel(R) Curie(TM) module can be used to read gyroscope data
+*/
+      
+#include <BMI160Gen.h>
+#include <SPI.h>
+
+const int irq_pin = 30;
+const int i2c_addr = 0x69;
+
+const float Kp = 3.5, Ki = 0.05;
+float exInt, eyInt, ezInt;
+float q0 = 1.0f, q1 = 0.0f, q2 = 0.0f, q3 = 0.0f; // roll,pitch,yaw 都为 0 时对应的四元数值。
+
+float pitch, yaw, roll;
+
+
+void setup() {
+  Serial.begin(115200); // initialize Serial communication
+  //Wire.begin();
+  //While (!Serial);
+
+  // initialize device
+  Serial.println("Initializing IMU device...");
+  BMI160.begin(BMI160GenClass::SPI_MODE, /* SS pin# = */10);
+  //BMI160.begin(BMI160GenClass::I2C_MODE, i2c_addr, irq_pin);
+  uint8_t dev_id = BMI160.getDeviceID();
+  Serial.print("DEVICE ID: ");
+  Serial.println(dev_id, HEX);
+
+   // Set the accelerometer range to 2000 degrees/second
+  BMI160.setGyroRange(2000);
+  Serial.println("Initializing IMU device...done.");
+}
+
+
+void loop() {
+  int gxRaw, gyRaw, gzRaw;         // raw gyro values
+  float gx, gy, gz;
+  int16_t accelGyro[6] = {0};
+
+  // read raw gyro measurements from device
+  BMI160.readGyro(gxRaw, gyRaw, gzRaw);
+
+  // convert the raw gyro data to degrees/second
+  gx = convertRawGyro(gxRaw);
+  gy = convertRawGyro(gyRaw);
+  gz = convertRawGyro(gzRaw);
+
+  // display tab-separated gyro x/y/z values
+  Serial.print("Gyro:\t");
+  Serial.print(gx);
+  Serial.print("\t");
+  Serial.print(gy);
+  Serial.print("\t");
+  Serial.print(gz);
+  Serial.print("\t");
+
+  delay(100);
+  int axRaw, ayRaw, azRaw;         // raw accel values
+  float ax, ay, az;   //scaled accelerometer values
+
+  // read accelerometer measurements from device, scaled to the configured range
+  // read raw accel measurements from device
+  BMI160.readAccelerometer(axRaw, ayRaw, azRaw);
+  // convert the raw accel data to g
+  ax = convertRawAccel(axRaw);
+  ay = convertRawAccel(ayRaw);
+  az = convertRawAccel(azRaw);
+  // display tab-separated accelerometer x/y/z values
+  Serial.print("Accel:\t");
+  Serial.print(ax);
+  Serial.print("\t");
+  Serial.print(ay);
+  Serial.print("\t");
+  Serial.print(az);
+  Serial.println();
+  delay(100);
+
+  //IMUupdate(accelGyro[0] * 3.14 / 180., accelGyro[1] * 3.14 / 180., accelGyro[2] * 3.14 / 180., accelGyro[3] / 16384.0, accelGyro[4] / 16384.0, accelGyro[5] / 16384.0);
+
+  float halfT = 0.005;
+  float norm;
+  float vx, vy, vz;
+  float ex, ey, ez;
+
+  float q0q0 = q0*q0;
+  float q0q1 = q0*q1;
+  float q0q2 = q0*q2;
+  float q1q1 = q1*q1;
+  float q1q3 = q1*q3;
+  float q2q2 = q2*q2;
+  float q2q3 = q2*q3;
+  float q3q3 = q3*q3;
+
+  if(ax*ay*az==0)
+      return;
+
+  // 第一步：对加速度数据进行归一化
+  norm = sqrt(ax*ax + ay*ay + az*az); 
+  ax = ax / norm; 
+  ay = ay / norm; 
+  az = az / norm; 
+
+  // 第二步：DCM矩阵旋转
+  vx = 2*(q1q3 - q0q2); 
+  vy = 2*(q0q1 + q2q3); 
+  vz = q0q0 - q1q1 - q2q2 + q3q3 ;
+
+  // 第三步：在机体坐标系下做向量叉积得到补偿数据
+  ex = ay*vz - az*vy ;
+  ey = az*vx - ax*vz ;
+  ez = ax*vy - ay*vx ;
+
+  // 第四步：对误差进行PI计算，补偿角速度
+  exInt = exInt + ex * Ki;
+  eyInt = eyInt + ey * Ki;
+  ezInt = ezInt + ez * Ki;
+
+  gx = gx + Kp*ex + exInt;
+  gy = gy + Kp*ey + eyInt;
+  gz = gz + Kp*ez + ezInt;
+
+  // 第五步：按照四元数微分公式进行四元数更新
+  q0 = q0 + (-q1*gx - q2*gy - q3*gz)*halfT;
+  q1 = q1 + (q0*gx + q2*gz - q3*gy)*halfT;
+  q2 = q2 + (q0*gy - q1*gz + q3*gx)*halfT;
+  q3 = q3 + (q0*gz + q1*gy - q2*gx)*halfT;
+
+  norm = sqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3);
+  q0 = q0/norm;
+  q1 = q1/norm;
+  q2 = q2/norm;
+  q3 = q3/norm;
+
+  roll =  atan2f(2*q2*q3 + 2*q0*q1, -2*q1*q1 - 2*q2*q2 + 1)*57.3;     
+  pitch =  asinf(2*q1*q3 - 2*q0*q2)*57.3;                                                          
+  yaw  =  -atan2f(2*q1*q2 + 2*q0*q3, -2*q2*q2 -2*q3*q3 + 1)*57.3; 
+
+  //Serial.print("pitch: ");
+  Serial.print(pitch);Serial.print("\t");
+  // Serial.print("yaw: ");
+  Serial.print(yaw);Serial.print("\t");
+  // Serial.print("roll: ");
+  Serial.println(roll);
+}
+
+float convertRawGyro(int gRaw) {
+  // since we are using 2000 degrees/seconds range
+  // -2000 maps to a raw value of -32768
+  // +2000 maps to a raw value of 32767
+
+  float g = (gRaw * 2000.0) / 32767.0;
+
+  return g;
+}
+float convertRawAccel(int aRaw) {
+  // since we are using 2000 degrees/seconds range
+  // -2g to a raw value of -32768
+  // +2g to a raw value of 32767
+
+  float a = ((aRaw * 2.0) / 32768.0) * 9.8;
+
+  return a;
+}
+
+// void IMUupdate(float gx, float gy, float gz, float ax,float ay, float az)
+// {
+    
+
+// }
+
+
+/*
+   Copyright (c) 2016 Intel Corporation.  All rights reserved.
+   This library is free software; you can redistribute it and/or
+   modify it under the terms of the GNU Lesser General Public
+   License as published by the Free Software Foundation; either
+   version 2.1 of the License, or (at your option) any later version.
+   This library is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   Lesser General Public License for more details.
+   You should have received a copy of the GNU Lesser General Public
+   License along with this library; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+*/

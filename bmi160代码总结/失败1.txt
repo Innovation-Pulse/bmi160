@@ -1,0 +1,271 @@
+#include <BMI160Gen.h>
+#include <SPI.h>
+
+const int irq_pin = 30;
+const int i2c_addr = 0x69;
+
+float q0 = 1.0f, q1 = 0.0f, q2 = 0.0f, q3 = 0.0f; // 初始四元数为 [1, 0, 0, 0]
+
+void setup() {
+  Serial.begin(115200); // 初始化串口通信
+  while (!Serial);    // wait for the serial port to open
+  SPI.begin();        // 启动 SPI 总线
+
+  pinMode(10, OUTPUT); // 设置片选引脚为输出模式
+  pinMode(9, OUTPUT); // 设置片选引脚为输出模式
+  digitalWrite(10, HIGH); // 禁用第一个从机
+  digitalWrite(9, HIGH); // 禁用第二个从机
+
+  BMI160.begin(BMI160GenClass::SPI_MODE, 10); // 使用 SPI 模式，SS pin = 10
+  BMI160.begin(BMI160GenClass::SPI_MODE, /* SS pin# = */9);
+  uint8_t dev_id = BMI160.getDeviceID();
+  BMI160.setGyroRange(2000); // 设置陀螺仪量程为 2000    ？仪量程不确定
+}
+
+void loop() {
+
+  float gx, gy, gz; // 陀螺仪数据
+  float ax, ay, az; 
+
+  digitalWrite(10, LOW);
+  delay(1); // 等待芯片响应时间，具体时间可能需要根据芯片手册来确定
+  
+  float gx1, gy1, gz1; // 陀螺仪数据
+  float ax1, ay1, az1; // 加速度计数据
+
+  // 读取陀螺仪数据
+  int gx1Raw, gy1Raw, gz1Raw;
+  BMI160.readGyro(gx1Raw, gy1Raw, gz1Raw);
+  gx1 = convertRawGyro(gx1Raw);
+  gy1 = convertRawGyro(gy1Raw);
+  gz1 = convertRawGyro(gz1Raw);
+
+  // 读取加速度计数据
+  int ax1Raw, ay1Raw, az1Raw;
+  BMI160.readAccelerometer(ax1Raw, ay1Raw, az1Raw);
+  ax1 = convertRawAccel(ax1Raw);
+  ay1 = convertRawAccel(ay1Raw);
+  az1 = convertRawAccel(az1Raw);
+
+
+  // 使用陀螺仪数据和加速度计数据进行姿态更新
+  updateIMU1(gx1, gy1, gz1, ax1, ay1, az1);
+
+  // 输出姿态信息
+  //Serial.print("Yaw: ");
+  Serial.print(getYaw1());
+  Serial.print("\t");
+  //Serial.print("\t Pitch: ");
+  Serial.print(getPitch1());
+  Serial.print("\t");
+  //Serial.print("\t Roll: ");
+  Serial.print(getRoll1());
+  Serial.print("\t");
+  digitalWrite(10, HIGH);
+  // 等待一小段时间以确保数据稳定
+  delay(10);
+
+  // 选中第二个从机
+  digitalWrite(9, LOW);
+  delay(1); // 等待芯片响应时间
+  float gx2, gy2, gz2; // 陀螺仪数据
+  float ax2, ay2, az2; // 加速度计数据
+
+  // 读取陀螺仪数据
+  int gx2Raw, gy2Raw, gz2Raw;
+  BMI160.readGyro(gx2Raw, gy2Raw, gz2Raw);
+  gx2 = convertRawGyro(gx2Raw);
+  gy2 = convertRawGyro(gy2Raw);
+  gz2 = convertRawGyro(gz2Raw);
+
+  // 读取加速度计数据
+  int ax2Raw, ay2Raw, az2Raw;
+  BMI160.readAccelerometer(ax2Raw, ay2Raw, az2Raw);
+  ax2 = convertRawAccel(ax2Raw);
+  ay2 = convertRawAccel(ay2Raw);
+  az2 = convertRawAccel(az2Raw);
+
+
+  // 使用陀螺仪数据和加速度计数据进行姿态更新
+  updateIMU2(gx2, gy2, gz2, ax2, ay2, az2);
+
+  // 输出姿态信息
+  //Serial.print("Yaw: ");
+  Serial.print(getYaw2());
+  Serial.print("\t");
+  //Serial.print("\t Pitch: ");
+  Serial.print(getPitch2());
+  Serial.print("\t");
+  //Serial.print("\t Roll: ");
+  Serial.println(getRoll2());
+  digitalWrite(9, HIGH);
+  // 等待一小段时间以确保数据稳定
+  delay(100);
+
+}
+
+// 以下函数用于将原始传感器数据转换为实际物理量
+float convertRawGyro(int gRaw) {
+  return (gRaw * 2000.0) / 32767.0;
+}
+
+float convertRawAccel(int aRaw) {
+  return ((aRaw * 2.0) / 32768.0) * 9.8;
+}
+
+// 以下函数用于更新姿态信息
+void updateIMU1(float gx1, float gy1, float gz1, float ax1, float ay1, float az1) {
+  // 根据陀螺仪数据和加速度计数据进行姿态更新的算法
+  // 这里省略了实际的姿态更新逻辑，可以使用卡尔曼滤波器、互补滤波器等方法进行姿态更新
+  // 你需要根据你的实际需求和算法来实现这个函数
+  // 具体的算法需要根据你的 IMU、姿态表示和工程需求进行选择和优化
+  const float Kp = 3.5, Ki = 0.05;
+  float exInt, eyInt, ezInt;
+
+
+  float halfT = 0.005;
+  float norm;
+  float vx, vy, vz;
+  float ex, ey, ez;
+
+  float q0q0 = q0*q0;
+  float q0q1 = q0*q1;
+  float q0q2 = q0*q2;
+  float q1q1 = q1*q1;
+  float q1q3 = q1*q3;
+  float q2q2 = q2*q2;
+  float q2q3 = q2*q3;
+  float q3q3 = q3*q3;
+
+  if(ax1*ay1*az1==0)
+      return;
+
+  // 第一步：对加速度数据进行归一化
+  norm = sqrt(ax1*ax1 + ay1*ay1 + az1*az1); 
+  ax1 = ax1 / norm; 
+  ay1 = ay1 / norm; 
+  az1 = az1 / norm; 
+
+  // 第二步：DCM矩阵旋转
+  vx = 2*(q1q3 - q0q2); 
+  vy = 2*(q0q1 + q2q3); 
+  vz = q0q0 - q1q1 - q2q2 + q3q3 ;
+
+  // 第三步：在机体坐标系下做向量叉积得到补偿数据
+  ex = ay1*vz - az1*vy ;
+  ey = az1*vx - ax1*vz ;
+  ez = ax1*vy - ay1*vx ;
+
+  // 第四步：对误差进行PI计算，补偿角速度
+  exInt = exInt + ex * Ki;
+  eyInt = eyInt + ey * Ki;
+  ezInt = ezInt + ez * Ki;
+
+  gx1 = gx1 + Kp*ex + exInt;
+  gy1 = gy1 + Kp*ey + eyInt;
+  gz1 = gz1 + Kp*ez + ezInt;
+
+  // 第五步：按照四元数微分公式进行四元数更新
+  q0 = q0 + (-q1*gx1 - q2*gy1 - q3*gz1)*halfT;
+  q1 = q1 + (q0*gx1 + q2*gz1 - q3*gy1)*halfT;
+  q2 = q2 + (q0*gy1 - q1*gz1 + q3*gx1)*halfT;
+  q3 = q3 + (q0*gz1 + q1*gy1 - q2*gx1)*halfT;
+
+  norm = sqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3);
+  q0 = q0/norm;
+  q1 = q1/norm;
+  q2 = q2/norm;
+  q3 = q3/norm;
+  
+}
+
+// 以下函数用于获取姿态信息（角度）
+float getRoll1() {
+  return atan2(2 * (q0*q1 + q2*q3), 1 - 2 * (q1*q1 + q2*q2)) * 180 / M_PI;
+}
+
+float getPitch1() {
+  return asin(2 * (q0*q2 - q3*q1)) * 180 / M_PI;
+}
+
+float getYaw1() {
+  return atan2(2 * (q0*q3 + q1*q2), 1 - 2 * (q2*q2 + q3*q3)) * 180 / M_PI;
+}
+
+void updateIMU2(float gx2, float gy2, float gz2, float ax2, float ay2, float az2) {
+  // 根据陀螺仪数据和加速度计数据进行姿态更新的算法
+  // 这里省略了实际的姿态更新逻辑，可以使用卡尔曼滤波器、互补滤波器等方法进行姿态更新
+  // 你需要根据你的实际需求和算法来实现这个函数
+  // 具体的算法需要根据你的 IMU、姿态表示和工程需求进行选择和优化
+  const float Kp = 3.5, Ki = 0.05;
+  float exInt, eyInt, ezInt;
+
+
+  float halfT = 0.005;
+  float norm;
+  float vx, vy, vz;
+  float ex, ey, ez;
+
+  float q0q0 = q0*q0;
+  float q0q1 = q0*q1;
+  float q0q2 = q0*q2;
+  float q1q1 = q1*q1;
+  float q1q3 = q1*q3;
+  float q2q2 = q2*q2;
+  float q2q3 = q2*q3;
+  float q3q3 = q3*q3;
+
+  if(ax2*ay2*az2==0)
+      return;
+
+  // 第一步：对加速度数据进行归一化
+  norm = sqrt(ax2*ax2 + ay2*ay2 + az2*az2); 
+  ax2 = ax2 / norm; 
+  ay2 = ay2 / norm; 
+  az2 = az2 / norm; 
+
+  // 第二步：DCM矩阵旋转
+  vx = 2*(q1q3 - q0q2); 
+  vy = 2*(q0q1 + q2q3); 
+  vz = q0q0 - q1q1 - q2q2 + q3q3 ;
+
+  // 第三步：在机体坐标系下做向量叉积得到补偿数据
+  ex = ay2*vz - az2*vy ;
+  ey = az2*vx - ax2*vz ;
+  ez = ax2*vy - ay2*vx ;
+
+  // 第四步：对误差进行PI计算，补偿角速度
+  exInt = exInt + ex * Ki;
+  eyInt = eyInt + ey * Ki;
+  ezInt = ezInt + ez * Ki;
+
+  gx2 = gx2 + Kp*ex + exInt;
+  gy2 = gy2 + Kp*ey + eyInt;
+  gz2 = gz2 + Kp*ez + ezInt;
+
+  // 第五步：按照四元数微分公式进行四元数更新
+  q0 = q0 + (-q1*gx2 - q2*gy2 - q3*gz2)*halfT;
+  q1 = q1 + (q0*gx2 + q2*gz2 - q3*gy2)*halfT;
+  q2 = q2 + (q0*gy2 - q1*gz2 + q3*gx2)*halfT;
+  q3 = q3 + (q0*gz2 + q1*gy2 - q2*gx2)*halfT;
+
+  norm = sqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3);
+  q0 = q0/norm;
+  q1 = q1/norm;
+  q2 = q2/norm;
+  q3 = q3/norm;
+  
+}
+
+// 以下函数用于获取姿态信息（角度）
+float getRoll2() {
+  return atan2(2 * (q0*q1 + q2*q3), 1 - 2 * (q1*q1 + q2*q2)) * 180 / M_PI;
+}
+
+float getPitch2() {
+  return asin(2 * (q0*q2 - q3*q1)) * 180 / M_PI;
+}
+
+float getYaw2() {
+  return atan2(2 * (q0*q3 + q1*q2), 1 - 2 * (q2*q2 + q3*q3)) * 180 / M_PI;
+}

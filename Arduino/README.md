@@ -1,0 +1,1 @@
+用哪个复制到C:\Users\xxx（用户名）\Documents\Arduino\libraries目录里，有些代码我改过，相关源代码放在资料链接里，可以结合着资料链接和bmi160代码总结看
